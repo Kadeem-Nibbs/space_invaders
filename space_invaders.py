@@ -1,6 +1,5 @@
 import sys, pygame, random
 from pygame import K_LEFT, K_RIGHT, K_UP, K_DOWN
-from random import randrange
 
 pygame.init()
 
@@ -114,6 +113,16 @@ class Player(pygame.sprite.Sprite):
 class Laser(pygame.sprite.Sprite):
 
     def __init__(self, player_rect):
+        """
+        Initializes laser just above player's position.
+
+        Parameters:
+        -----------
+        player_rect: pygame.rect
+            A rect that contains the bounds of the players rectangular image
+
+        """
+        pygame.sprite.Sprite.__init__(self)
         self.image = pygame.image.load(LASER_IMAGE_FILE).convert()
         self.rect = self.image.get_rect()
         x = ((player_rect.left + player_rect.right) / 2) - \
@@ -126,7 +135,41 @@ class Laser(pygame.sprite.Sprite):
     def move(self):
         self.rect = self.rect.move(UP)
 
+    def is_off_screen(self):
+        if self.rect.bottom < 0:
+            return True
+        else:
+            return False
+
+def create_alien_fleet():
+    """
+    Initializes and returns alien fleet as two dimensional array of Alien
+    objects. Earlier rows of aliens are displayed higher on the screen than
+    later rows, and aliens within each row are ordered from furthest left to
+    furthest right.
+
+    """
+    alien_fleet = []
+    for y in range(ALIEN_ROWS): # space aliens throughout top of window
+        alien_row = [Alien(x*HORIZONTAL_SPACING, y*VERTICAL_SPACING) \
+            for x in range(ALIENS_PER_ROW)]
+        alien_fleet.append(alien_row)
+    return alien_fleet
+
 def update_player_position(screen, player, keys_pressed):
+    """
+    Updates player_position according to keys being pressed
+
+    Parameters:
+    -----------
+    screen: pygame.Surface
+        A surface representing the window that all game objects are drawn to.
+    player: Player
+        A Player containing a rect to move around the screen.
+    keys_pressed: list
+        List containing the keys currently being pressed by the player.
+
+    """
     if keys_pressed[K_LEFT] and keys_pressed[K_RIGHT]:
         pass
     elif keys_pressed[K_LEFT]:
@@ -136,28 +179,52 @@ def update_player_position(screen, player, keys_pressed):
     screen.blit(player.image, player.rect)
 
 def update_laser_positions(screen, player, laser_list, keys_pressed):
+    """
+    Moves existing lasers along the screen and adds new lasers if the up arrow
+    key is pressed.
+
+    Parameters:
+    -----------
+    screen: pygame.Surface
+        A surface representing the window that all game objects are drawn to.
+    player: Player
+        A Player containing a rect to move around the screen.
+    laser_list: pygame.sprite.Group
+        A group containing all of the lasers currently on the screen
+    keys_pressed: list
+        List containing the keys currently being pressed by the player.
+
+    """
     if keys_pressed[K_UP]:
         laser = Laser(player.rect)
-        laser_list.append(laser)
+        laser_list.add(laser)
     for laser in laser_list:
         laser.move()
-        screen.blit(laser.image, laser.rect)
+        if laser.is_off_screen():
+            laser.kill()
+    laser_list.draw(screen)
 
-def create_alien_fleet():
-    alien_fleet = []
-    for y in range(ALIEN_ROWS): # space aliens throughout top of window
-        alien_row = [Alien(x*HORIZONTAL_SPACING, y*VERTICAL_SPACING) \
-            for x in range(ALIENS_PER_ROW)]
-        alien_fleet.append(alien_row)
-    return alien_fleet
+def update_alien_positions(screen, alien_fleet, alien_group, counter):
+    """
+    Updates alien positions.
 
-def update_alien_positions(screen, alien_fleet, counter):
+    Parameters:
+    -----------
+    screen: pygame.Surface
+        A surface representing the window that all game objects are drawn to.
+    alien_fleet: list of list of Alien objects
+        2-d list containing entire alien fleet, both alive and dead.
+    alien_group: pygame.sprite.Group
+        Group containing aliens on screen.
+    counter: int
+        The total number of ticks elapsed since the game started.
+
+    """
     if alien_velocity[0] < 0: # fleet moving left
         for alien_row in alien_fleet: # move and redraw aliens
             for alien in alien_row:
                 if (counter % ALIEN_MOVE_PERIOD) == 0:
                     alien.update()
-                screen.blit(alien.image, alien.rect)
     else: # fleet moving right
         for alien_row in alien_fleet:
             for alien in alien_row[::-1]: # reverse row so that the first
@@ -165,9 +232,28 @@ def update_alien_positions(screen, alien_fleet, counter):
                 # first
                 if (counter % ALIEN_MOVE_PERIOD) == 0:
                     alien.update()
-                screen.blit(alien.image, alien.rect)
     if alien_velocity[1]:
         alien_velocity[1] = 0
+    alien_group.draw(screen)
+
+def remove_collisions(alien_fleet, laser_list):
+    """
+    Clears aliens and lasers that collided from screen.
+
+    Parameters:
+    -----------
+    alien_fleet: list of list of Alien objects
+        List containing all of the aliens remaining on screen.
+    laser_list: pygame.sprite.Group
+        A group containing all of the lasers currently on the screen
+
+    """
+    for alien_row in alien_fleet:
+        for alien in alien_row:
+            lasers_hit = pygame.sprite.spritecollide(alien, laser_list, True)
+            if lasers_hit:
+                alien.kill() # remove alien from all groups it is a part of,
+                    # stops it from being redrawn
 
 def run():
     """Runs the game until one of the following game over conditions is met:
@@ -178,11 +264,18 @@ def run():
 
     """
     player = Player()
-    alien_fleet = create_alien_fleet()
-    laser_list = []
+    alien_fleet = create_alien_fleet() # all aliens, alive and dead
+    alien_group = pygame.sprite.Group() # live aliens
+    for alien_row in alien_fleet:
+        for alien in alien_row:
+            alien_group.add(alien)
+    laser_list = pygame.sprite.Group()
 
     counter = 0 # number of game ticks
     while True:
+        if not alien_group:
+            pygame.time.delay(1000)
+            raise SystemExit # temporary Game Over mechanism
         screen.fill(BLACK) # clear screen
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
@@ -191,8 +284,9 @@ def run():
         keys_pressed = pygame.key.get_pressed()
         update_player_position(screen, player, keys_pressed)
         update_laser_positions(screen, player, laser_list, keys_pressed)
-        update_alien_positions(screen, alien_fleet, counter)
-
+        update_alien_positions(screen, alien_fleet, alien_group, counter)
+        remove_collisions(alien_fleet, laser_list)
+        alien_group.draw(screen)
         pygame.display.flip()
         counter += 1
         pygame.time.delay(DELAY)
